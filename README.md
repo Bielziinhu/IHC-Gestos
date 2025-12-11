@@ -5,9 +5,8 @@ Esse repositório possui alguns projetos que usam apenas uma webcam e gestos man
 ## ✨ Funcionalidades do Mouse
 
 * **Controle de Cursor:** Mova o mouse apontando com o dedo indicador.
-* **Clique Esquerdo & Arrastar:** Pinça com Indicador + Polegar (suporta Drag & Drop).
-* **Clique Direito:** Pinça com Dedo Médio + Polegar.
-* **Ajuste de Sensibilidade:** Controle em tempo real via teclado.
+* **Clique Esquerdo & Arrastar:** Pinça com Indicador + Polegar (Suporte para segurar).
+* **Clique Direito:** Dedo médio com dedo indicador.
 * **Estabilidade:** Algoritmo de suavização para evitar tremores no cursor.
 
 ## ✨ Funcionalidades do Corpo

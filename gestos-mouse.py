@@ -5,131 +5,135 @@ import numpy as np
 import time
 import math
 
-pyautogui.FAILSAFE = False 
+pyautogui.FAILSAFE = False
 
 wCam, hCam = 640, 480
-frame_r = 90           # Sensibilidade Inicial
-suavizacao = 5          # Suavização
-distancia_click = 30    # Distância do gatilho
+frame_r = 5
+smooth = 4
 
-p_loc_x, p_loc_y = 0, 0
-c_loc_x, c_loc_y = 0, 0
-clique_ativo = False    
-ultimo_click_dir = 0    
-
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(
+hands = mp.solutions.hands.Hands(
     max_num_hands=1,
     min_detection_confidence=0.7,
-    min_tracking_confidence=0.5
+    min_tracking_confidence=0.7
 )
 mp_draw = mp.solutions.drawing_utils
 
 cap = cv2.VideoCapture(0)
 cap.set(3, wCam)
 cap.set(4, hCam)
+
 wScr, hScr = pyautogui.size()
 
-def calcular_distancia(p1, p2, lm_list, img, draw=True):
-    x1, y1 = lm_list[p1][1], lm_list[p1][2]
-    x2, y2 = lm_list[p2][1], lm_list[p2][2]
-    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-    length = math.hypot(x2 - x1, y2 - y1)
+pX, pY = 0, 0
 
-    if draw and length < 50:
-        cv2.line(img, (x1, y1), (x2, y2), (255, 0, 255), 2)
-        cv2.circle(img, (cx, cy), 5, (255, 0, 255), cv2.FILLED)
-    
-    return length, cx, cy
+left_down = False
+dragging = False
+last_right = 0
 
-print("W/S: sensi | Q: sair")
+pinch_prev_state = False
+pinch_last_open_time = 0
+DOUBLE_CLICK_WINDOW = 0.25
 
-try:
-    while True:
-        success, img = cap.read()
-        if not success:
-            break
-            
-        img = cv2.flip(img, 1)
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = hands.process(img_rgb)
-        
-        texto_acao = "" 
+last_scroll_y = None
+scroll_cooldown = 0
 
-        if results.multi_hand_landmarks:
-            for hand_lms in results.multi_hand_landmarks:
-                mp_draw.draw_landmarks(img, hand_lms, mp_hands.HAND_CONNECTIONS)
-                
-                lm_list = []
-                for id, lm in enumerate(hand_lms.landmark):
-                    h, w, c = img.shape
-                    cx, cy = int(lm.x * w), int(lm.y * h)
-                    lm_list.append([id, cx, cy])
 
-                if len(lm_list) != 0:
-                    x1, y1 = lm_list[8][1], lm_list[8][2]
-                    
-                    cv2.rectangle(img, (frame_r, frame_r), (wCam - frame_r, hCam - frame_r), (255, 0, 255), 2)
-                    
-                    x3 = np.interp(x1, (frame_r, wCam - frame_r), (0, wScr))
-                    y3 = np.interp(y1, (frame_r, hCam - frame_r), (0, hScr))
-                    
-                    c_loc_x = p_loc_x + (x3 - p_loc_x) / suavizacao
-                    c_loc_y = p_loc_y + (y3 - p_loc_y) / suavizacao
-                    
-                    pyautogui.moveTo(c_loc_x, c_loc_y)
-                    p_loc_x, p_loc_y = c_loc_x, c_loc_y
+def distancia(a, b, lm):
+    return math.hypot(lm[a][1] - lm[b][1], lm[a][2] - lm[b][2])
 
-                    dist_esq, cx, cy = calcular_distancia(8, 4, lm_list, img)
-                    
-                    if dist_esq < distancia_click:
-                        cv2.circle(img, (cx, cy), 15, (0, 255, 0), cv2.FILLED)
-                        texto_acao = "Clique esquerdo"
-                        
-                        if not clique_ativo:
-                            pyautogui.mouseDown()
-                            clique_ativo = True
+
+def dedo_levantado(lm, tip, pip):
+    return lm[tip][2] < lm[pip][2]
+
+
+while True:
+    ok, img = cap.read()
+    img = cv2.flip(img, 1)
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    results = hands.process(rgb)
+
+    if results.multi_hand_landmarks:
+        for handlm in results.multi_hand_landmarks:
+            mp_draw.draw_landmarks(img, handlm, mp.solutions.hands.HAND_CONNECTIONS)
+
+            lm = []
+            h, w, _ = img.shape
+            for id, pt in enumerate(handlm.landmark):
+                lm.append([id, int(pt.x * w), int(pt.y * h)])
+
+            ind_up = dedo_levantado(lm, 8, 6)
+            med_up = dedo_levantado(lm, 12, 10)
+            ane_up = dedo_levantado(lm, 16, 14)
+            min_up = dedo_levantado(lm, 20, 18)
+
+            if ind_up and not med_up and not ane_up and not min_up:
+                x, y = lm[8][1], lm[8][2]
+                xMapped = np.interp(x, (frame_r, wCam - frame_r), (0, wScr))
+                yMapped = np.interp(y, (frame_r, hCam - frame_r), (0, hScr))
+
+                cX = pX + (xMapped - pX) / smooth
+                cY = pY + (yMapped - pY) / smooth
+
+                pyautogui.moveTo(cX, cY)
+                pX, pY = cX, cY
+
+            pinch = distancia(4, 8, lm)
+            pinch_closed = pinch < 28
+
+            if pinch_closed:
+                now = time.time()
+
+                if not pinch_prev_state:
+                    if now - pinch_last_open_time <= DOUBLE_CLICK_WINDOW:
+                        pyautogui.doubleClick()
                     else:
-                        if clique_ativo:
-                            pyautogui.mouseUp()
-                            clique_ativo = False
+                        pyautogui.mouseDown()
+                        left_down = True
+                        dragging = True
 
-                    dist_dir, cx, cy = calcular_distancia(12, 4, lm_list, img)
-                    
-                    if dist_dir < distancia_click:
-                        cv2.circle(img, (cx, cy), 15, (0, 0, 255), cv2.FILLED)
-                        texto_acao = "Clique direito"
-                        
-                        if (time.time() - ultimo_click_dir) > 0.5:
-                            pyautogui.rightClick()
-                            ultimo_click_dir = time.time()
+                pinch_prev_state = True
 
-                    # Adicionar depois logica de dois cliques
-                    #if dist_dir >= distancia_click:
-                     #   ultimo_click_dir = 0
+            else:
+                if pinch_prev_state:
+                    pinch_last_open_time = time.time()
 
-        else:
-            if clique_ativo:
-                pyautogui.mouseUp()
-                clique_ativo = False
+                    if left_down:
+                        pyautogui.mouseUp()
+                        left_down = False
+                        dragging = False
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('w'): 
-            if frame_r > 20: frame_r -= 5
-            texto_acao = f"Sensibilidade: {frame_r}"
-        elif key == ord('s'): 
-            if frame_r < 200: frame_r += 5
-            texto_acao = f"Sensibilidade: {frame_r}"
-        elif key == ord('q'):
-            break
+                pinch_prev_state = False
 
-        if texto_acao != "":
-            cv2.putText(img, texto_acao, (20, 50), cv2.FONT_HERSHEY_PLAIN, 2, (0, 255, 0), 2)
-        
-        cv2.imshow("IHC - Sistema Mouse", img)
+            is_v = ind_up and med_up and not ane_up and not min_up
 
-finally:
-    pyautogui.mouseUp()
-    cap.release()
-    cv2.destroyAllWindows()
-    print("Fechando sistema")
+            if is_v and time.time() - last_right > 0.4:
+                pyautogui.rightClick()
+                last_right = time.time()
+
+            is_open = ind_up and med_up and ane_up and min_up
+
+            if is_open:
+                y = lm[9][2]
+
+                if last_scroll_y is None:
+                    last_scroll_y = y
+
+                dy = y - last_scroll_y
+                last_scroll_y = y
+
+                if abs(dy) > 12 and time.time() - scroll_cooldown > 0.05:
+                    if dy > 0:
+                        pyautogui.scroll(-80)
+                    else:
+                        pyautogui.scroll(80)
+
+                    scroll_cooldown = time.time()
+            else:
+                last_scroll_y = None
+
+    cv2.imshow("Mouse por Gestos", img)
+    if cv2.waitKey(1) == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
