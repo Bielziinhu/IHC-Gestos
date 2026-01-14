@@ -8,7 +8,7 @@ import math
 pyautogui.FAILSAFE = False
 
 wCam, hCam = 640, 480
-frame_r = 5
+frame_r = 25
 smooth = 4
 
 hands = mp.solutions.hands.Hands(
